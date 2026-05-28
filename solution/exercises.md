@@ -60,6 +60,7 @@ Tôi đã xây dựng một file giao diện trực quan tại [gradio_app.py](f
 3. **Cấu Hình Tham Số**: Thanh trượt điều chỉnh trực quan giá trị Temperature (0.0 – 2.0) và Max Tokens (64 – 2048).
 4. **Lịch Sử Hội Thoại**: Tự động duy trì ngữ cảnh tối đa 3 lượt hội thoại gần nhất.
 5. **Giao Diện Premium**: Sử dụng Theme Soft với tông màu tối thời thượng (purple/indigo/slate).
+<img width="1878" height="902" alt="image" src="https://github.com/user-attachments/assets/5f7b0ffb-3a94-425d-af70-8cd107a2cfc1" />
 
 ## Danh Sách Kiểm Tra Nộp Bài
 - [x] Tất cả tests pass: `pytest tests/ -v`
