@@ -1,0 +1,12 @@
+# Ignore everything
+/*
+
+# Exclude .gitignore and the solution folder
+!.gitignore
+!/solution/
+
+# Do not track python cache files
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd

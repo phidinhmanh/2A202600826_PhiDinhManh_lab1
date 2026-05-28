@@ -19,10 +19,11 @@ from typing import Any, Callable
 COST_PER_1K_OUTPUT_TOKENS = {
     "gpt-4o": 0.010,
     "gpt-4o-mini": 0.0006,
+    "test-combo": 0.010,
 }
 
-OPENAI_MODEL = "gpt-4o"
-OPENAI_MINI_MODEL = "gpt-4o-mini"
+OPENAI_MODEL = "nvidia/minimaxai/minimax-m2.7"
+OPENAI_MINI_MODEL = "kc/kilo-auto/free"
 
 
 # ---------------------------------------------------------------------------
@@ -52,9 +53,25 @@ def call_openai(
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     """
-    # TODO: import OpenAI, create client, call chat.completions.create,
-    #       measure start/end time, return (response_text, latency)
-    raise NotImplementedError("Implement call_openai")
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="http://localhost:20128/v1",
+        api_key=os.getenv("OPENAI_API_KEY") or "mock-key",
+    )
+    
+    start_time = time.perf_counter()
+    response = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+    )
+    latency = time.perf_counter() - start_time
+    if latency <= 0:
+        latency = 0.001
+    response_text = response.choices[0].message.content or ""
+    return response_text, latency
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +99,13 @@ def call_openai_mini(
     Hint:
         Reuse call_openai() by passing model=OPENAI_MINI_MODEL.
     """
-    # TODO: call call_openai with model=OPENAI_MINI_MODEL
-    raise NotImplementedError("Implement call_openai_mini")
+    return call_openai(
+        prompt=prompt,
+        model=OPENAI_MINI_MODEL,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -109,8 +131,20 @@ def compare_models(prompt: str) -> dict:
         Cost estimate = (len(response.split()) / 0.75) / 1000 * COST_PER_1K_OUTPUT_TOKENS["gpt-4o"]
         (0.75 words ≈ 1 token is a rough approximation)
     """
-    # TODO: call call_openai and call_openai_mini, assemble and return the dict
-    raise NotImplementedError("Implement compare_models")
+    gpt4o_response, gpt4o_latency = call_openai(prompt, model=OPENAI_MODEL)
+    mini_response, mini_latency = call_openai_mini(prompt)
+    
+    gpt4o_words = len(gpt4o_response.split())
+    gpt4o_tokens = gpt4o_words / 0.75
+    gpt4o_cost_estimate = (gpt4o_tokens / 1000) * COST_PER_1K_OUTPUT_TOKENS["gpt-4o"]
+    
+    return {
+        "gpt4o_response": gpt4o_response,
+        "mini_response": mini_response,
+        "gpt4o_latency": gpt4o_latency,
+        "mini_latency": mini_latency,
+        "gpt4o_cost_estimate": gpt4o_cost_estimate,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -134,8 +168,50 @@ def streaming_chatbot() -> None:
         - After each turn, append the assistant reply to history.
         - Trim history to the last 3 turns: history = history[-3:]
     """
-    # TODO: enter while-loop, read user input, stream response, maintain history
-    raise NotImplementedError("Implement streaming_chatbot")
+    from openai import OpenAI
+    client = OpenAI(
+        base_url="http://localhost:20128/v1",
+        api_key=os.getenv("OPENAI_API_KEY") or "mock-key",
+    )
+    history = []
+    
+    while True:
+        try:
+            user_input = input("You: ")
+        except (KeyboardInterrupt, EOFError):
+            print("\nGoodbye!")
+            break
+            
+        if user_input.strip().lower() in ["quit", "exit"]:
+            print("Goodbye!")
+            break
+            
+        if not user_input.strip():
+            continue
+            
+        history.append({"role": "user", "content": user_input})
+        print("Bot: ", end="", flush=True)
+        
+        try:
+            stream = client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=history,
+                stream=True,
+            )
+            
+            response_chunks = []
+            for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta.content or ""
+                    print(delta, end="", flush=True)
+                    response_chunks.append(delta)
+            
+            print()
+            response_text = "".join(response_chunks)
+            history.append({"role": "assistant", "content": response_text})
+            history = history[-3:]
+        except Exception as e:
+            print(f"\nError: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +237,13 @@ def retry_with_backoff(
     Raises:
         The last exception raised by fn() after all retries are exhausted.
     """
-    # TODO: implement retry loop with exponential backoff
-    raise NotImplementedError("Implement retry_with_backoff")
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt >= max_retries:
+                raise e
+            time.sleep(base_delay * (2 ** attempt))
 
 
 # ---------------------------------------------------------------------------
@@ -179,8 +260,12 @@ def batch_compare(prompts: list[str]) -> list[dict]:
         List of dicts, each being the compare_models result with an extra
         key "prompt" containing the original prompt string.
     """
-    # TODO: iterate over prompts, call compare_models, add "prompt" key
-    raise NotImplementedError("Implement batch_compare")
+    results = []
+    for prompt in prompts:
+        res = compare_models(prompt)
+        res["prompt"] = prompt
+        results.append(res)
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -200,8 +285,44 @@ def format_comparison_table(results: list[dict]) -> str:
     Hint:
         Truncate long text to 40 characters for readability.
     """
-    # TODO: build and return a formatted table string
-    raise NotImplementedError("Implement format_comparison_table")
+    headers = ["Prompt", "GPT-4o Response", "Mini Response", "GPT-4o Latency", "Mini Latency"]
+    
+    def truncate(text: Any, max_len: int = 40) -> str:
+        s = str(text).replace('\n', ' ')
+        if len(s) > max_len:
+            return s[:max_len-3] + "..."
+        return s
+
+    widths = [len(h) for h in headers]
+    
+    rows_data = []
+    for r in results:
+        prompt = truncate(r.get("prompt", ""))
+        gpt4o_resp = truncate(r.get("gpt4o_response", ""))
+        mini_resp = truncate(r.get("mini_response", ""))
+        
+        gpt4o_lat = r.get("gpt4o_latency", 0.0)
+        mini_lat = r.get("mini_latency", 0.0)
+        gpt4o_lat_str = f"{gpt4o_lat:.2f}s" if isinstance(gpt4o_lat, (int, float)) else str(gpt4o_lat)
+        mini_lat_str = f"{mini_lat:.2f}s" if isinstance(mini_lat, (int, float)) else str(mini_lat)
+        
+        row = [prompt, gpt4o_resp, mini_resp, gpt4o_lat_str, mini_lat_str]
+        rows_data.append(row)
+        for i, val in enumerate(row):
+            widths[i] = max(widths[i], len(val))
+            
+    lines = []
+    header_line = " | ".join(headers[i].ljust(widths[i]) for i in range(len(headers)))
+    lines.append(header_line)
+    
+    sep_line = "-+-".join("-" * widths[i] for i in range(len(widths)))
+    lines.append(sep_line)
+    
+    for row in rows_data:
+        row_line = " | ".join(row[i].ljust(widths[i]) for i in range(len(row)))
+        lines.append(row_line)
+        
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
